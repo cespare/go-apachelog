@@ -26,7 +26,7 @@ type Record struct {
 
 // Write the Record out as a single log line to out.
 func (r *Record) Log(out io.Writer) {
-	timeFormatted := r.time.Format("02/Jan/2006 03:04:05")
+	timeFormatted := r.time.Format("02/Jan/2006 15:04:05")
 	fmt.Fprintf(out, apacheFormatPattern, r.ip, timeFormatted, r.method, r.uri, r.protocol, r.status,
 		r.responseBytes, r.elapsedTime.Seconds())
 }
@@ -81,7 +81,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	h.handler.ServeHTTP(record, r)
 	finishTime := time.Now()
 
-	record.time = finishTime.UTC()
+	record.time = finishTime
 	record.elapsedTime = finishTime.Sub(startTime)
 
 	record.Log(h.out)
