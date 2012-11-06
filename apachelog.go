@@ -73,7 +73,7 @@ type Handler struct {
 
 // Create a new Handler, given some underlying http.Handler to wrap and an output stream (typically
 // os.Stderr).
-func NewHandler(handler http.Handler, out io.Writer) http.Handler {
+func NewHandler(handler http.Handler, out io.Writer) *Handler {
 	return &Handler{
 		handler: handler,
 		out:     out,
