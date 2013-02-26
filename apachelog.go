@@ -24,8 +24,8 @@ package apachelog
 import (
 	"fmt"
 	"io"
+	"net"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -82,14 +82,9 @@ func NewHandler(handler http.Handler, out io.Writer) *Handler {
 
 // This delegates to the underlying handler's ServeHTTP method and writes one log line for every call.
 func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	clientIP := r.RemoteAddr
-	if colon := strings.LastIndex(clientIP, ":"); colon != -1 {
-		clientIP = clientIP[:colon]
-	}
-
 	record := &Record{
 		ResponseWriter: rw,
-		ip:             clientIP,
+		ip:             getIP(r.RemoteAddr),
 		time:           time.Time{},
 		method:         r.Method,
 		uri:            r.RequestURI,
@@ -106,4 +101,17 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	record.elapsedTime = finishTime.Sub(startTime)
 
 	record.Log(h.out)
+}
+
+// A best-effort attempt at getting the IP from http.Request.RemoteAddr. For a Go server, they typically look
+// like this:
+// 127.0.0.1:36341
+// [::1]:44092
+// I think this is standard for IPv4 and IPv6 addresses.
+func getIP(remoteAddr string) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		return remoteAddr
+	}
+	return host
 }
