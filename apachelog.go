@@ -4,8 +4,8 @@ variant of this log format (http://httpd.apache.org/docs/1.3/logs.html#common) a
 in Ruby. The format has an additional field at the end for the response time in seconds.
 
 Using apachelog is typically very simple. You'll need to create an http.Handler and set up your request
-routing first. In a simple web application, for example, you might just use http.DefaultServeMux. Next, wrap
-the http.Handler in an apachelog.Handler using NewHandler, create an http.Server with this handler, and you're
+routing first. In a simple web application, for example, you might just use http.NewServeMux(). Next, wrap the
+http.Handler in an apachelog handler using NewHandler, create an http.Server with this handler, and you're
 good to go.
 
 Example:
@@ -33,8 +33,8 @@ import (
 // in seconds at the the end of the log line.
 const apacheFormatPattern = "%s - - [%s] \"%s %s %s\" %d %d %0.4f\n"
 
-// A wrapper around a ResponseWriter that carries other metadata needed to write a log line.
-type Record struct {
+// record is a wrapper around a ResponseWriter that carries other metadata needed to write a log line.
+type record struct {
 	http.ResponseWriter
 
 	ip                    string
@@ -45,44 +45,44 @@ type Record struct {
 	elapsedTime           time.Duration
 }
 
-// Write the Record out as a single log line to out.
-func (r *Record) Log(out io.Writer) {
+// Log writes the record out as a single log line to out.
+func (r *record) Log(out io.Writer) {
 	timeFormatted := r.time.Format("02/Jan/2006 15:04:05")
 	fmt.Fprintf(out, apacheFormatPattern, r.ip, timeFormatted, r.method, r.uri, r.protocol, r.status,
 		r.responseBytes, r.elapsedTime.Seconds())
 }
 
-// This proxies to the underlying ResponseWriter.Write method while recording response size.
-func (r *Record) Write(p []byte) (int, error) {
+// Write proxies to the underlying ResponseWriter.Write method while recording response size.
+func (r *record) Write(p []byte) (int, error) {
 	written, err := r.ResponseWriter.Write(p)
 	r.responseBytes += int64(written)
 	return written, err
 }
 
-// This proxies to the underlying ResponseWriter.WriteHeader method while recording response status.
-func (r *Record) WriteHeader(status int) {
+// WriteHeader proxies to the underlying ResponseWriter.WriteHeader method while recording response status.
+func (r *record) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
 }
 
-// This is an http.Handler that logs each response.
-type Handler struct {
-	handler http.Handler
-	out     io.Writer
+// handler is an http.Handler that logs each response.
+type handler struct {
+	http.Handler
+	out io.Writer
 }
 
-// Create a new Handler, given some underlying http.Handler to wrap and an output stream (typically
-// os.Stderr).
-func NewHandler(handler http.Handler, out io.Writer) *Handler {
-	return &Handler{
-		handler: handler,
+// NewHandler creates a new http.Handler, given some underlying http.Handler to wrap and an output stream
+// (typically os.Stderr).
+func NewHandler(h http.Handler, out io.Writer) http.Handler {
+	return &handler{
+		Handler: h,
 		out:     out,
 	}
 }
 
-// This delegates to the underlying handler's ServeHTTP method and writes one log line for every call.
-func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	record := &Record{
+// ServeHTTP delegates to the underlying handler's ServeHTTP method and writes one log line for every call.
+func (h *handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+	record := &record{
 		ResponseWriter: rw,
 		ip:             getIP(r.RemoteAddr),
 		time:           time.Time{},
@@ -94,7 +94,7 @@ func (h *Handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	startTime := time.Now()
-	h.handler.ServeHTTP(record, r)
+	h.Handler.ServeHTTP(record, r)
 	finishTime := time.Now()
 
 	record.time = finishTime
