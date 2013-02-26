@@ -1,7 +1,7 @@
 /*
-apachelog is a library for logging the responses of an http.Handler in the Apache Common Log Format. It uses a
-variant of this log format (http://httpd.apache.org/docs/1.3/logs.html#common) also used by Rack::CommonLogger
-in Ruby. The format has an additional field at the end for the response time in seconds.
+Package apachelog is a library for logging the responses of an http.Handler in the Apache Common Log Format.
+It uses a variant of this log format (http://httpd.apache.org/docs/1.3/logs.html#common) also used by
+Rack::CommonLogger in Ruby. The format has an additional field at the end for the response time in seconds.
 
 Using apachelog is typically very simple. You'll need to create an http.Handler and set up your request
 routing first. In a simple web application, for example, you might just use http.NewServeMux(). Next, wrap the
