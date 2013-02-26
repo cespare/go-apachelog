@@ -10,7 +10,7 @@ good to go.
 
 Example:
 
-		mux := http.DefaultServeMux
+		mux := http.NewServeMux()
 		mux.HandleFunc("/", handler)
 		loggingHandler := apachelog.NewHandler(mux, os.Stderr)
 		server := &http.Server{
