@@ -22,6 +22,8 @@ Example:
 package apachelog
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -33,23 +35,28 @@ import (
 // in seconds at the the end of the log line.
 const apacheFormatPattern = "%s - - [%s] \"%s %s %s\" %d %d %0.4f\n"
 
+var ErrHijackingNotSupported = errors.New("hijacking not supported")
+
 // record is a wrapper around a ResponseWriter that carries other metadata needed to write a log line.
 type record struct {
 	http.ResponseWriter
 
 	ip                    string
-	time                  time.Time
+	startTime             time.Time
 	method, uri, protocol string
 	status                int
 	responseBytes         int64
-	elapsedTime           time.Duration
+	finishTime            time.Time
+	hijacked              bool
+	out                   io.Writer
 }
 
 // Log writes the record out as a single log line to out.
-func (r *record) Log(out io.Writer) {
-	timeFormatted := r.time.Format("02/Jan/2006 15:04:05")
-	fmt.Fprintf(out, apacheFormatPattern, r.ip, timeFormatted, r.method, r.uri, r.protocol, r.status,
-		r.responseBytes, r.elapsedTime.Seconds())
+func (r *record) Log() {
+	timeFormatted := r.finishTime.Format("02/Jan/2006 15:04:05")
+	elapsedTime := r.finishTime.Sub(r.startTime)
+	fmt.Fprintf(r.out, apacheFormatPattern, r.ip, timeFormatted, r.method, r.uri, r.protocol, r.status,
+		r.responseBytes, elapsedTime.Seconds())
 }
 
 // Write proxies to the underlying ResponseWriter.Write method while recording response size.
@@ -63,6 +70,34 @@ func (r *record) Write(p []byte) (int, error) {
 func (r *record) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *record) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, ErrHijackingNotSupported
+	}
+	c, rw, err := hj.Hijack()
+	if err != nil {
+		return c, rw, err
+	}
+
+	r.hijacked = true
+	hr := hijackRecord{c, r}
+
+	return hr, rw, nil
+}
+
+type hijackRecord struct {
+	net.Conn
+	r *record
+}
+
+func (h hijackRecord) Close() error {
+	h.r.finishTime = time.Now()
+	h.r.Log()
+
+	return h.Conn.Close()
 }
 
 // handler is an http.Handler that logs each response.
@@ -85,22 +120,20 @@ func (h *handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	record := &record{
 		ResponseWriter: rw,
 		ip:             getIP(r.RemoteAddr),
-		time:           time.Time{},
+		startTime:      time.Now(),
 		method:         r.Method,
 		uri:            r.RequestURI,
 		protocol:       r.Proto,
 		status:         http.StatusOK,
-		elapsedTime:    time.Duration(0),
+		hijacked:       false,
+		out:            h.out,
 	}
 
-	startTime := time.Now()
 	h.Handler.ServeHTTP(record, r)
-	finishTime := time.Now()
-
-	record.time = finishTime
-	record.elapsedTime = finishTime.Sub(startTime)
-
-	record.Log(h.out)
+	if !record.hijacked {
+		record.finishTime = time.Now()
+		record.Log()
+	}
 }
 
 // A best-effort attempt at getting the IP from http.Request.RemoteAddr. For a Go server, they typically look
