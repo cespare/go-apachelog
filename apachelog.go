@@ -103,8 +103,8 @@ func (h *handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	record.Log(h.out)
 }
 
-// A best-effort attempt at getting the IP from http.Request.RemoteAddr. For a Go server, they typically look
-// like this:
+// getIP makes a best-effort attempt at getting the IP from http.Request.RemoteAddr. For a Go server, they
+// typically look like this:
 // 127.0.0.1:36341
 // [::1]:44092
 // I think this is standard for IPv4 and IPv6 addresses.
