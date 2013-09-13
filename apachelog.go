@@ -22,6 +22,8 @@ Example:
 package apachelog
 
 import (
+	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -31,24 +33,43 @@ import (
 
 // Using a variant of apache common log format used in Ruby's Rack::CommonLogger which includes response time
 // in seconds at the the end of the log line.
-const apacheFormatPattern = "%s - - [%s] \"%s %s %s\" %d %d %0.4f\n"
+const apacheFormatPattern = "%s - - [%s] \"%s %s %s\" %d %d %.4f\n"
+
+var ErrHijackingNotSupported = errors.New("hijacking is not supported")
 
 // record is a wrapper around a ResponseWriter that carries other metadata needed to write a log line.
 type record struct {
 	http.ResponseWriter
+	out io.Writer // Same as the handler's out; the record needs to be able to log itself.
 
+	// Only used for intermediate calculations
+	startTime time.Time
+
+	// Fields needed to produce log line
 	ip                    string
-	time                  time.Time
+	endTime               time.Time
 	method, uri, protocol string
 	status                int
 	responseBytes         int64
 	elapsedTime           time.Duration
 }
 
-// Log writes the record out as a single log line to out.
-func (r *record) Log(out io.Writer) {
-	timeFormatted := r.time.Format("02/Jan/2006 15:04:05")
-	fmt.Fprintf(out, apacheFormatPattern, r.ip, timeFormatted, r.method, r.uri, r.protocol, r.status,
+// start sets up any initial state for this record before it is used to serve a request.
+func (r *record) start() {
+	r.startTime = time.Now()
+}
+
+// finish finalizes any data and logs the request.
+func (r *record) finish() {
+	r.endTime = time.Now()
+	r.elapsedTime = r.endTime.Sub(r.startTime)
+	r.log()
+}
+
+// log writes the record out as a single log line to r.out.
+func (r *record) log() {
+	timeFormatted := r.endTime.Format("02/Jan/2006 15:04:05")
+	fmt.Fprintf(r.out, apacheFormatPattern, r.ip, timeFormatted, r.method, r.uri, r.protocol, r.status,
 		r.responseBytes, r.elapsedTime.Seconds())
 }
 
@@ -63,6 +84,15 @@ func (r *record) Write(p []byte) (int, error) {
 func (r *record) WriteHeader(status int) {
 	r.status = status
 	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *record) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	w, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, ErrHijackingNotSupported
+	}
+	r.finish()
+	return w.Hijack()
 }
 
 // handler is an http.Handler that logs each response.
@@ -82,25 +112,18 @@ func NewHandler(h http.Handler, out io.Writer) http.Handler {
 
 // ServeHTTP delegates to the underlying handler's ServeHTTP method and writes one log line for every call.
 func (h *handler) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
-	record := &record{
-		ResponseWriter: rw,
-		ip:             getIP(r.RemoteAddr),
-		time:           time.Time{},
-		method:         r.Method,
-		uri:            r.RequestURI,
-		protocol:       r.Proto,
-		status:         http.StatusOK,
-		elapsedTime:    time.Duration(0),
-	}
+	rec := new(record)
+	rec.start()
+	rec.ResponseWriter = rw
+	rec.out = h.out
+	rec.ip = getIP(r.RemoteAddr)
+	rec.method = r.Method
+	rec.uri = r.RequestURI
+	rec.protocol = r.Proto
+	rec.status = http.StatusOK
 
-	startTime := time.Now()
-	h.Handler.ServeHTTP(record, r)
-	finishTime := time.Now()
-
-	record.time = finishTime
-	record.elapsedTime = finishTime.Sub(startTime)
-
-	record.Log(h.out)
+	h.Handler.ServeHTTP(rec, r)
+	rec.finish()
 }
 
 // getIP makes a best-effort attempt at getting the IP from http.Request.RemoteAddr. For a Go server, they
